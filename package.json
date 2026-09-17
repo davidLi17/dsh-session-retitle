@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-retitle",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH 插件：在会话头部加一个「重命名」按钮，手动触发时读取本会话内容、用当前模型生成中文短标题并写回会话名（session/title）。零运行时依赖、能力逐个探测、失败只影响按钮。",
   "keywords": [
     "dsh",

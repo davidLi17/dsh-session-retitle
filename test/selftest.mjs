@@ -577,4 +577,92 @@ console.log('8) 客户端插件：注册到会话头部动作区')
   ok('客户端按钮注册在 conversation.session.header.actions')
 }
 
+console.log('9) 客户端主题跟随（2026-09-16 明暗不跟随的修复）')
+{
+  /** 造一个够用的假 document：能注入 <style>、能读主题标记与 CSS 变量。 */
+  function makeFakeDocument({ dark = false, vars = true } = {}) {
+    const byId = new Map()
+    const makeEl = (tag) => ({
+      tagName: tag,
+      id: '',
+      textContent: '',
+      children: [],
+      appendChild(child) { this.children.push(child); if (child.id) byId.set(child.id, child) },
+      getAttribute() { return null },
+      setAttribute() {},
+      hasAttribute() { return false },
+      classList: { contains: () => false },
+    })
+    const head = makeEl('head')
+    const documentElement = makeEl('html')
+    const body = {
+      hasAttribute: (name) => (dark && name === 'data-ds-dark-theme'),
+      getAttribute: () => null,
+      classList: { contains: () => false },
+    }
+    return {
+      head,
+      body,
+      documentElement,
+      createElement: makeEl,
+      getElementById: (id) => byId.get(id) || null,
+      defaultView: {
+        getComputedStyle: () => ({
+          getPropertyValue: (name) => (vars && name === '--dsw-alias-label-primary' ? ' #f9fafb' : ''),
+          backgroundColor: dark ? 'rgb(20,20,20)' : 'rgb(255,255,255)',
+        }),
+        matchMedia: () => ({ matches: dark, addEventListener() {}, removeEventListener() {} }),
+      },
+    }
+  }
+
+  let loaded = null
+  globalThis.window = { __ModuleLoader__: { load: (definition) => { loaded = definition } } }
+  globalThis.document = makeFakeDocument({ dark: false })
+  await import(`../lib/client.js?theme=${Date.now()}`)
+  const mod = loaded.factory((name) => {
+    if (name === 'react') return { createElement: () => ({}), useState: () => [undefined, () => {}], useEffect: () => {}, useRef: () => ({ current: null }) }
+    throw new Error(`客户端不允许依赖 ${name}`)
+  })
+  const t = mod.__test
+
+  // ① 样式表必须用 DSH 真实的变量族，且不能再出现旧的自造变量
+  for (const name of ['--dsw-alias-label-primary', '--dsw-alias-border-l2', '--dsw-specific-menu', '--dsw-alias-interactive-bg-hover']) {
+    assert.ok(t.SHEET.includes(name), `样式表应使用 DSH 变量 ${name}`)
+  }
+  assert.ok(!t.SHEET.includes('--dsh-bg-elevated'), '不应再出现不存在的 --dsh-bg-elevated')
+  assert.ok(!/background:\s*#fff/i.test(t.SHEET), '面板背景不应写死白色')
+  assert.ok(t.SHEET.includes('Canvas'), '最后兜底应是 CSS 系统色')
+  assert.ok(t.SHEET.includes(':hover'), '悬停态交给 CSS（内联写不了 hover）')
+  ok('样式表走 DSH 变量 + 系统色兜底，且已清掉自造的 --dsh-* 变量与写死白色')
+
+  // ② 主题检测
+  assert.equal(t.detectTheme(makeFakeDocument({ dark: true })), 'dark', 'DSH 的 data-ds-dark-theme 应被识别')
+  assert.equal(t.detectTheme(makeFakeDocument({ dark: false })), 'light')
+  assert.equal(t.detectTheme({ body: null, documentElement: null }), 'light', '拿不到 DOM 时保守返回 light')
+  ok('detectTheme：识别 DSH 暗色标记，拿不到 DOM 时保守')
+
+  // ③ 变量可用性探测
+  assert.equal(t.dswVariablesAvailable(makeFakeDocument({ vars: true })), true)
+  assert.equal(t.dswVariablesAvailable(makeFakeDocument({ vars: false })), false, '变量缺失时应能探测到（走自带色板）')
+  ok('dswVariablesAvailable：区分"变量可用"与"需兜底色板"')
+
+  // ④ 自带色板明暗分明（变量缺失时的第二层保险）
+  const dark = t.paletteFor('dark')
+  const light = t.paletteFor('light')
+  assert.notEqual(dark.panel, light.panel)
+  assert.notEqual(dark.text, light.text)
+  assert.ok(t.fallbackStyles('dark').panel.color === dark.text, '暗色兜底应用暗色文字')
+  assert.ok(t.fallbackStyles('light').panel.background === light.panel)
+  ok('paletteFor / fallbackStyles：明暗两套色板分明')
+
+  // ⑤ 样式注入幂等（apply 可能被多次调用）
+  const doc = makeFakeDocument({})
+  assert.equal(t.ensureStylesheet(doc), true)
+  assert.equal(t.ensureStylesheet(doc), true)
+  assert.equal(doc.head.children.length, 1, '同一个 id 只应注入一次')
+  assert.equal(doc.getElementById(t.STYLE_ID).textContent, t.SHEET)
+  ok('ensureStylesheet：按 id 幂等注入，不重复插 <style>')
+}
+
 console.log(`\n全部通过：${pass} 项\n`)

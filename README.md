@@ -7,6 +7,7 @@ DSH（DeepSeek Harness）插件：**在会话头部加一个「重命名」按�
 - 手动：只有你点按钮才会跑。不轮询、不后台常驻、不自动改你的会话名。
 - 一次调用：读会话 → 调一次模型 → 写一条 `session/title`。
 - 两条路：留空输入框 = 按内容自动起名；填了名字 = 直接用你给的名字（不花模型调用）。
+- 跟随主题：界面颜色全部走 DSH 自己的 CSS 变量（`--dsw-alias-*`），明暗主题切换自动生效。
 - 零运行时依赖：不 import 任何 `@deepseek-ai/*` 包，只发两条自己的 HTTP 路由。
 
 ## 安装
@@ -71,7 +72,7 @@ dsh plugin --profile web remove dsh-session-retitle
 ## 自测
 
 ```bash
-node test/selftest.mjs         # 30 项：纯函数 + 假 ctx 路由分支 + 客户端插槽注册
+node test/selftest.mjs         # 35 项：纯函数 + 假 ctx 路由分支 + 客户端插槽注册 + 主题跟随
 node test/contract-check.mjs   # 4 项：拿真实 DSH 包验证消息形状/分片处理/官方标题归一化
 ```
 
@@ -96,6 +97,19 @@ node test/contract-check.mjs   # 4 项：拿真实 DSH 包验证消息形状/分
 adapter，按"选中一个路由就死磕"的写法必然失败。改为**候选路由依次尝试**：会话路由 → 官方默认模型 →
 插件兜底，前一个不可用就换下一个，并在 `warnings` 里说明发生了回退。同时加了**同会话并发保护**
 （连点按钮第二次返回 429）和 **`/status` 错误台账**（`byCode` 计数 + 最近 5 条 `recentErrors`）。
+
+**第三个坑：暗色主题下白底白字**。按钮/气泡的颜色最初写成 `var(--dsh-bg-elevated, …)` ——
+DSH 里**根本没有** `--dsh-*` 这族变量（它用的是 `--dsw-alias-*`，定义在 `dsh-client-ui-theme` 的
+`:root{}` 与 `[data-ds-dark-theme]{}` 两组里，同名两套值），于是 `#fff` 兜底生效、面板在暗色下惨白。
+改为三层保险：
+
+1. **主**：颜色全走 `--dsw-alias-*`（`label-primary/secondary/tertiary`、`border-l1/l2`、`bg-layer-2`、
+   `specific-menu`、`interactive-bg-hover`、`elevation-*`）—— 值随主题切换，浏览器自动重绘，零 JS；
+2. **备**：运行时探测这些变量是否存在；不存在（DSH 以后改名）就用 `detectTheme()` 读到的明暗落自带色板；
+3. **兜底**：CSS 系统色 `Canvas` / `CanvasText`，至少不会白底白字。
+
+顺带把悬停/聚焦态从内联样式搬进注入的 `<style>`（内联写不了 `:hover`），并给气泡设 `color-scheme`，
+让输入框的原生控件（光标、选区）也跟着主题走。
 
 ## 实现（为什么这么写）
 
