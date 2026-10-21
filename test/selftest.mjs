@@ -169,13 +169,13 @@ function makeFlakyLlm({ badProviders = [], text = '回退后的标题' } = {}) {
 
 console.log('1) 配置与工具函数')
 {
-  const config = normalizeConfig({ maxDigestBytes: 1234.7, provider: 'x', model: '', nope: 1 })
-  assert.equal(config.maxDigestBytes, 1234, '小数应向下取整')
-  assert.equal(config.provider, '', 'provider/model 只有一半时应成对清空')
-  assert.equal(config.model, '')
+  const config = normalizeConfig({ maxDigestChars: 1234.7, provider: 'x', model: '', nope: 1 })
+  assert.equal(config.maxDigestChars, 1234, '小数应向下取整')
+  assert.equal(config.provider, undefined, '旧的兜底模型配置不再生效')
+  assert.equal(config.model, undefined)
   assert.equal(config.routePrefix, '/dsh-session-retitle', '未给出的字段走默认值')
   assert.equal(normalizeConfig(null).timeoutMs, 45000, 'null 配置不应炸')
-  ok('normalizeConfig：默认值 + 非法值忽略 + 路由成对校验')
+  ok('normalizeConfig：默认值 + 非法值忽略 + 忽略旧兜底路由')
 
   assert.equal(truncateUtf8('一二三', 6), '一二', '按字节截断不能切坏中文')
   assert.equal(truncateUtf8('abcdef', 4), 'abcd')
@@ -215,9 +215,27 @@ console.log('2) 会话素材抽取')
   assert.equal(capped.truncated, true)
   ok('collectDigest：条数上限生效且保留最近内容')
 
-  const long = collectDigest([humanMsg(1, '啊'.repeat(5000))], normalizeConfig({ maxDigestBytes: 300 }))
-  assert.ok(long.bytes <= 300 || long.items.length <= 1, `超预算时应从头丢弃，bytes=${long.bytes}`)
+  const long = collectDigest([humanMsg(1, '啊'.repeat(5000))], normalizeConfig({ maxDigestChars: 300 }))
+  assert.equal(long.chars, 300)
+  assert.equal(Array.from(long.items[0].text).length, 300)
   ok('collectDigest：总量字节预算生效')
+}
+
+{
+  const events = Array.from({ length: 14 }, (_, i) => i % 2 ? assistantMsg(i, '回复' + i) : humanMsg(i, '消息' + i))
+  const digest = collectDigest(events, normalizeConfig())
+  assert.equal(digest.items.length, 10)
+  assert.equal(digest.items[0].seq, 4)
+  const unicode = collectDigest([humanMsg(1, '旧消息'), assistantMsg(2, '😀中'.repeat(6000))], normalizeConfig())
+  assert.equal(unicode.chars, 10000)
+  assert.equal(unicode.items.length, 1)
+  assert.equal(Array.from(unicode.items[0].text).length, 10000)
+  assert.ok(!unicode.items[0].text.includes('\uFFFD'))
+  const boundary = collectDigest([humanMsg(1, '旧'.repeat(9000)), assistantMsg(2, '新'.repeat(2000))], normalizeConfig())
+  assert.deepEqual(boundary.items.map(x => Array.from(x.text).length), [8000, 2000])
+  assert.equal(boundary.humanCount, 1)
+  assert.equal(boundary.assistantCount, 1)
+  ok('10条消息与10000 Unicode字符预算、单条超长和边界截断')
 }
 
 console.log('3) 标题清洗与路由选择')
@@ -338,12 +356,10 @@ console.log('4) host 路由：/rename 主流程')
   mod.apply(fbCtx.ctx, FALLBACK_CONFIG)
   fbCtx.runInject()
   const fbResult = await callRoute(fbCtx.routes, '/dsh-session-retitle/rename', { sessionId: 'session-demo' })
-  assert.equal(fbResult.res.statusCode, 200, '会话路由不可用时应回退，而不是把错误甩给按钮')
-  assert.equal(fbResult.json.title, '回退后的标题')
-  assert.equal(fbResult.json.route.provider, 'deepseek-official', 'route 应报告实际用上的兜底路由')
-  assert.equal(fb.services.llm.captured.calls, 2, '先试会话路由、失败后回退一次')
-  assert.ok(fbResult.json.warnings.some((w) => w.includes('回退')), '应说明发生了回退')
-  ok('会话路由无 adapter → 自动回退到兜底路由（2026-09-16 deepseek-vision 回归用例）')
+  assert.equal(fbResult.res.statusCode, 502)
+  assert.equal(fb.services.llm.captured.calls, 1, '不能静默切换模型')
+  assert.equal(fb.renamed.length, 0, '失败保留旧标题')
+  ok('目标会话模型失败不降级、不改名')
 
   // 两个候选都不可用 → 如实报错，不改名
   const dead = makeServices({ sessionRoute: { provider: 'deepseek-vision', model: 'deepseek-vision' } })
@@ -354,7 +370,7 @@ console.log('4) host 路由：/rename 主流程')
   const deadResult = await callRoute(deadCtx.routes, '/dsh-session-retitle/rename', { sessionId: 'session-demo' })
   assert.equal(deadResult.res.statusCode, 502)
   assert.equal(deadResult.json.error.code, 'llm-failed')
-  assert.equal(dead.services.llm.captured.calls, 2, '两个候选都应试过')
+  assert.equal(dead.services.llm.captured.calls, 1, '只调用目标会话模型')
   assert.equal(dead.renamed.length, 0)
   ok('所有候选路由都不可用 → 502，且不改名')
 }
@@ -401,6 +417,15 @@ console.log('5) host 路由：失败分支')
     assert.equal(json.error.code, 'llm-failed')
     assert.equal(renamed.length, 0, '模型失败时不能改名')
     ok('模型调用失败 → 502，且不改名')
+  }
+
+  // 输出了文字但最终报错，不得拿半截标题覆写。
+  {
+    const { services, renamed } = makeServices()
+    services.llm = makeLlm('不应写入', { finish: { type: 'finish', reason: { kind: 'error', failure: { message: 'failed' } } } })
+    await assert.rejects(() => retitleOnce({ services, sessionId: 'session-demo', config: normalizeConfig() }))
+    assert.equal(renamed.length, 0)
+    ok('模型带文本错误终止也保留旧标题')
   }
 
   // 模型返回空文本
@@ -548,7 +573,7 @@ console.log('8) 客户端插件：注册到会话头部动作区')
   assert.equal(loaded.id, 'dsh-session-retitle')
 
   const fakeReact = {
-    createElement: () => ({}),
+    createElement: (type, props, ...children) => ({ type, props, children }),
     useState: () => [undefined, () => {}],
     useEffect: () => {},
     useRef: () => ({ current: null }),
@@ -574,6 +599,50 @@ console.log('8) 客户端插件：注册到会话头部动作区')
   assert.equal(registration.definition.name, 'conversation.session.header.actions')
   assert.equal(registration.definition.id, 'session-retitle')
   assert.equal(typeof registration.component, 'function', '组件应是一个函数')
+  const menuSlot = registrations.find((item) => item.target === 'sidebar.workspaces.session.menu.item')
+  assert.ok(menuSlot)
+  menuSlot.cb()
+  assert.ok(registrations.some((item) => item.definition?.name === 'sidebar.workspaces.session.menu.item'))
+  assert.ok(registrations.some((item) => item.target === 'shell.overlay'))
+  let releaseFetch
+  let opened = false
+  let released = false
+  let requestedId
+  globalThis.fetch = async (_url, options) => {
+    assert.ok(opened, '等历史 ready 后才请求')
+    requestedId = JSON.parse(options.body).sessionId
+    await new Promise((resolve) => { releaseFetch = resolve })
+    return { ok: true, json: async () => ({ ok: true, title: '测试标题' }) }
+  }
+  const quick = clientModule.__test.createQuickRename({ sessions: {
+    using: async (id, options, operation) => {
+      assert.equal(id, 'inactive-B')
+      assert.equal(options.source, 'workspaceOperation')
+      opened = true
+      try { return await operation() } finally { released = true }
+    },
+  } })
+  let closed = false
+  let menuTarget
+  const MenuAction = clientModule.__test.createMenuAction((id) => { menuTarget = id })
+  const menu = MenuAction({ sessionId: 'inactive-B', useMenuOpenState: () => [true, () => { closed = true }] })
+  menu.props.onClick()
+  assert.equal(closed, true)
+  assert.equal(menuTarget, 'inactive-B')
+  const first = quick('inactive-B')
+  await Promise.resolve()
+  assert.equal(requestedId, 'inactive-B', '不读取 active session')
+  assert.ok(clientModule.__test.pending.has('inactive-B'))
+  await quick('inactive-B')
+  assert.equal(released, false)
+  releaseFetch()
+  await first
+  assert.equal(released, true)
+  assert.equal(clientModule.__test.pending.size, 0)
+  const failed = clientModule.__test.createQuickRename({ sessions: { using: async () => { throw new Error('open failed') } } })
+  await failed('failed')
+  assert.equal(clientModule.__test.pending.size, 0, '失败释放 busy')
+  delete globalThis.fetch
   ok('客户端按钮注册在 conversation.session.header.actions')
 }
 

@@ -1,8 +1,8 @@
 # dsh-session-retitle
 
-DSH（DeepSeek Harness）插件：**在会话头部加一个「重命名」按钮，手动触发时读取本会话内容、用当前模型起一个中文短标题，并写回会话名。**
+DSH（DeepSeek Harness）插件：**在侧栏「…」菜单增加「AI 快速重命名」，并保留会话头部一个「重命名」按钮，手动触发时读取本会话内容、用当前模型起一个中文短标题，并写回会话名。**
 
-补的是官方自动命名的空档：官方 `session-title-first-prompt-llm` 只在第一条消息时自动命名一次，之后聊偏了也不会改；本插件让你在**任何时刻**按一次按钮，用**整个会话的实际内容**重新起名，并且一旦手动改过，官方的自动命名不会再覆盖（`session/title` 的 `source.kind = user` 会被钉住）。
+补的是官方自动命名的空档：官方 `session-title-first-prompt-llm` 只在第一条消息时自动命名一次，之后聊偏了也不会改；本插件让你在**任何时刻**按一次按钮，用**最近的会话内容**重新起名，并且一旦手动改过，官方的自动命名不会再覆盖（`session/title` 的 `source.kind = user` 会被钉住）。
 
 - 手动：只有你点按钮才会跑。不轮询、不后台常驻、不自动改你的会话名。
 - 一次调用：读会话 → 调一次模型 → 写一条 `session/title`。
@@ -22,7 +22,9 @@ cp -p $P/pnpm-workspace.yaml $P/pnpm-workspace.yaml.bak-$S-prepluginupdate
 
 # 2) 安装。link: 指向源码目录：改代码只需重启，不用重装
 dsh plugin --profile web add link:/path/to/dsh-session-retitle
-#    也可以直接从 GitHub 装：dsh plugin --profile web add github:BPTumbleweed/dsh-session-retitle
+#    安装本 Fork 的功能分支（PR 合并前）：
+git clone --branch feat/session-menu-retitle https://github.com/davidLi17/dsh-session-retitle.git
+dsh plugin --profile web add link:"$PWD/dsh-session-retitle"
 
 # 3) 重启 dsh-web（host 与客户端插件都要重启才生效）
 #    自己就跑在这个服务里的话，重启要交给脱离会话 cgroup 的瞬时单元执行
@@ -44,19 +46,28 @@ curl -s http://127.0.0.1:<端口>/dsh-session-retitle/status | head -40   # 期�
 
 失败时按钮旁会显示原因（例如"这个会话里还没有可用来起名的内容"）。
 
+## 快速重命名
+
+侧栏目标会话的「…」→「AI 快速重命名」。不切换当前会话，未打开的历史会话会临时加载，完成后释放；关闭菜单不取消请求。成功或失败会在右下角提示。此版本不增加鼠标右键入口。
+
+默认取最近 10 条有效人类/助手文本消息（不是 10 轮），总正文最多 10000 个 Unicode code point，最新消息优先，边界消息截断后按时间顺序发送。工具日志不参与；不再使用旧的 800/600 字节单条截断。升级时请移除旧配置中的 maxDigestBytes、humanItemChars、assistantItemChars；它们不再生效。
+
+使用目标会话记录的模型生成中文短标题；模型不可用或无模型记录时保留原标题并提示，不静默切换默认模型。写入仍通过官方 sessionTitle.rename，侧栏由官方标题投影更新，不刷新整个页面。
+
+要求 DSH 提供 sidebar.workspaces.session.menu.item、shell.overlay 和客户端 sessions.using。旧版本仍可使用原头部按钮；新菜单需在实际 DSH 中验证。
+
 ## 配置（profile 的 `cordis.patch.yml` 覆盖）
 
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `routePrefix` | `/dsh-session-retitle` | 路由前缀，与客户端常量 `window.__DSH_SESSION_RETITLE_PREFIX__` 对应 |
 | `maxTitleBytes` | `80` | 标题字节预算（与官方 `session-title.maxTitleBytes` 对齐） |
-| `maxDigestBytes` | `8000` | 送给模型的会话素材上限，超了从头丢（保留最近的对话） |
-| `maxDigestItems` | `16` | 最多取多少条消息（人类消息 + 助手回复） |
+| `maxDigestChars` | `10000` | 正文 Unicode code point 总预算，优先保留最近消息 |
+| `maxDigestItems` | `10` | 最多取多少条消息（人类消息 + 助手回复） |
 | `timeoutMs` | `45000` | 标题模型调用超时 |
 | `maxOutputTokens` | `512` | 标题模型的最大输出 token（请求带 `purpose=session-title`，deepseek 适配器会据此关思考） |
-| `provider` / `model` | `deepseek-official` / `deepseek-flash` | 兜底路由：会话读不到 `request/header` 时才用 |
 
-路由选择顺序：**会话自己的 `request/header` → 官方 `agent-default-model` 当前选择 → 插件配置兜底**；三者都拿不到就明确报错，不编造标题。
+路由只采用目标会话自己的 `request/header`，不自动回退。
 
 ## 停用与回滚
 
@@ -94,9 +105,9 @@ node test/contract-check.mjs   # 4 项：拿真实 DSH 包验证消息形状/分
    把结束原因当失败报出来 —— 截断不该丢掉已经拿到的好标题。
 
 **同一天发现的第二个坑**：有的会话日志里记着 `deepseek-vision` 这个 provider，而当前部署没有它的
-adapter，按"选中一个路由就死磕"的写法必然失败。改为**候选路由依次尝试**：会话路由 → 官方默认模型 →
+adapter，按"选中一个路由就死磕"的写法必然失败。旧版改为**候选路由依次尝试**：会话路由 → 官方默认模型 →
 插件兜底，前一个不可用就换下一个，并在 `warnings` 里说明发生了回退。同时加了**同会话并发保护**
-（连点按钮第二次返回 429）和 **`/status` 错误台账**（`byCode` 计数 + 最近 5 条 `recentErrors`）。
+（本 Fork 为严格使用目标会话模型已取消路由回退，但保留并发保护，连点按钮第二次返回 429）和 **`/status` 错误台账**（`byCode` 计数 + 最近 5 条 `recentErrors`）。
 
 **第三个坑：暗色主题下白底白字**。按钮/气泡的颜色最初写成 `var(--dsh-bg-elevated, …)` ——
 DSH 里**根本没有** `--dsh-*` 这族变量（它用的是 `--dsw-alias-*`，定义在 `dsh-client-ui-theme` 的
@@ -116,20 +127,20 @@ DSH 里**根本没有** `--dsh-*` 这族变量（它用的是 `--dsw-alias-*`，
 ```
 lib/retitle.js   纯逻辑：会话事件 → 素材 → 模型请求 → 标题清洗（零依赖，可单测）
 lib/index.js     host：两条 HTTP 路由（/rename、/status），探测 sessions/llm/sessionTitle
-lib/client.js    客户端：会话头部动作区一个按钮 + 一个小气泡
+lib/client.js    客户端：头部按钮 + 侧栏菜单 + 结果提示
 ```
 
 - **不自己写 `session/title`**：改名交给官方 `SessionTitleService.rename()`，归一化、长度上限、`user` 来源钉住，全由官方负责；官方以后改规则，本插件自动跟上。
 - **能力逐个探测**：`webServer` / `connection` / `sessions` / `llm` / `sessionTitle` 缺任何一个，只让按钮报错（503 + 原因），不阻塞 DSH 启动。
 - **信任栅栏**：所有路由先过 `connection.requestRejection(req)`，栅栏不可用时 **fail-closed**（403），改名接口不会对外裸奔。
-- **客户端薄到极致**：只注册一个按钮；插件 UI API（插槽 + React 运行时）是最容易被 DSH 升级打断的一层，最坏情况是按钮消失，不影响会话本体。
+- **客户端薄到极致**：使用官方插槽注册按钮与菜单；插件 UI API（插槽 + React 运行时）是最容易被 DSH 升级打断的一层，最坏情况是按钮消失，不影响会话本体。
 - **不依赖 DSH 内部包**：插件以 `link:` 装在 workspace，Node 从插件真实路径解析不到 `@deepseek-ai/*`，硬依赖会直接炸掉实例。消息对象按官方 `createUserMessage()` 的形状手工构造（`{id, role, content[], source:{kind:'plugin',plugin}}`）。
 
 ## 已知边界
 
-- 只有**当前在内存里活着**的会话能改名（官方 `rename` 要求 `sessions.get(id) === session`）。历史归档会话点不到按钮，也就改不了。
+- 后端要求活会话；侧栏菜单使用官方临时引用加载历史，加载失败则提示且不改名。
 - 素材只取人类消息与助手文本回复，工具结果/插件快照/斜杠命令都当噪音丢掉 —— 这是刻意的，避免把 `bash` 输出当成会话主题。
-- 标题用会话主要语言（通常是中文），10 个汉字以内的提示词约束；模型不听话时由 `maxTitleBytes` 硬截断兜底。
+- 标题始终要求中文（技术名词可保留），10 个汉字以内的提示词约束；模型不听话时由 `maxTitleBytes` 硬截断兜底。
 
 ## 授权
 

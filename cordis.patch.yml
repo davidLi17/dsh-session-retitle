@@ -2,7 +2,7 @@
 #
 # 安装：
 #   dsh plugin --profile web add link:/path/to/dsh-session-retitle
-#   （或从 GitHub：dsh plugin --profile web add github:BPTumbleweed/dsh-session-retitle）
+#   （或从 GitHub：dsh plugin --profile web add github:davidLi17/dsh-session-retitle）
 # 停用：给下面的条目加 disabled: true，然后重启 dsh-web
 # 回滚：dsh plugin --profile web remove dsh-session-retitle
 #
@@ -15,10 +15,10 @@
         routePrefix: /dsh-session-retitle
         # 标题长度预算，与官方 session-title 服务的 maxTitleBytes(80) 对齐
         maxTitleBytes: 80
-        # 送给模型的会话素材上限（字节），防止长会话把请求撑大
-        maxDigestBytes: 8000
+        # 送给模型的会话素材上限（Unicode 字符），防止长会话把请求撑大
+        maxDigestChars: 10000
         # 最多取多少条消息（人机混合，按最近的往前取）
-        maxDigestItems: 16
+        maxDigestItems: 10
         # 标题模型调用超时
         timeoutMs: 45000
         # 标题模型的最大输出 token。
@@ -26,7 +26,3 @@
         # （官方标题 provider 正是这么做的），512 是给其他适配器/长标题留的余量。
         # 2026-09-16：这里曾是 64，配上自定义 purpose，思考没关 → 输出被截断。
         maxOutputTokens: 512
-        # 兜底路由：会话里读不到 request/header 时用哪套模型
-        # （留空则再尝试官方 agent-default-model 的当前选择）
-        provider: deepseek-official
-        model: deepseek-flash

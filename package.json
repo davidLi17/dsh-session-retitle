@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-retitle",
-  "version": "0.1.1",
-  "description": "DSH 插件：在会话头部加一个「重命名」按钮，手动触发时读取本会话内容、用当前模型生成中文短标题并写回会话名（session/title）。零运行时依赖、能力逐个探测、失败只影响按钮。",
+  "version": "0.1.2",
+  "description": "DSH 插件：侧栏菜单 AI 快速重命名，使用目标会话模型总结最近 10 条、最多 10000 字符；保留头部手动重命名。",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -28,7 +28,8 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ],
       "platform": "web"
     },
@@ -45,7 +46,7 @@
   "author": "Kan Zheng <202309068@uibe.edu.cn>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BPTumbleweed/dsh-session-retitle.git"
+    "url": "git+https://github.com/davidLi17/dsh-session-retitle.git"
   },
   "scripts": {
     "test": "node test/selftest.mjs"
