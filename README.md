@@ -22,8 +22,8 @@ cp -p $P/pnpm-workspace.yaml $P/pnpm-workspace.yaml.bak-$S-prepluginupdate
 
 # 2) 安装。link: 指向源码目录：改代码只需重启，不用重装
 dsh plugin --profile web add link:/path/to/dsh-session-retitle
-#    安装本 Fork 的功能分支（PR 合并前）：
-git clone --branch feat/session-menu-retitle https://github.com/davidLi17/dsh-session-retitle.git
+#    或克隆本 Fork 的 main（已包含侧栏 AI 快速重命名）：
+git clone --branch main https://github.com/davidLi17/dsh-session-retitle.git
 dsh plugin --profile web add link:"$PWD/dsh-session-retitle"
 
 # 3) 重启 dsh-web（host 与客户端插件都要重启才生效）
@@ -83,11 +83,11 @@ dsh plugin --profile web remove dsh-session-retitle
 ## 自测
 
 ```bash
-node test/selftest.mjs         # 35 项：纯函数 + 假 ctx 路由分支 + 客户端插槽注册 + 主题跟随
-node test/contract-check.mjs   # 4 项：拿真实 DSH 包验证消息形状/分片处理/官方标题归一化
+node test/selftest.mjs         # 39 项：版本一致性 + 纯函数 + 假 ctx 路由分支 + 客户端插槽注册 + 主题跟随
+node test/contract-check.mjs   # 1 项本地挂载配置 + 3 项真实 DSH 包契约
 ```
 
-`contract-check.mjs` 会去读本机安装的 DSH 包（用 `DSH_CHECKOUT=<dsh 安装目录>` 指定，或从当前 Node 安装前缀自动推断）；读不到就跳过（退出码 0）。
+`contract-check.mjs` 会去读本机安装的 DSH 包（用 `DSH_CHECKOUT=<dsh 安装目录>` 指定，或从当前 Node 安装前缀自动推断）；读不到时只跳过 3 项官方包契约（退出码 0），本地挂载配置契约仍会执行。此时不能将跳过报告为官方契约通过。
 
 ## 踩过的坑（2026-09-16）
 

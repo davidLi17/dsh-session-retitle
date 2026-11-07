@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-retitle",
-  "version": "0.1.2",
+  "version": "26.11.7-lhg",
   "description": "DSH 插件：侧栏菜单 AI 快速重命名，使用目标会话模型总结最近 10 条、最多 10000 字符；保留头部手动重命名。",
   "keywords": [
     "dsh",

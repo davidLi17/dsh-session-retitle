@@ -8,8 +8,9 @@
  *   ③ 客户端注册（假 window.__ModuleLoader__ + 假 react，验证按钮挂到了正确的插槽）
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
-import mod, { createStatus, retitleOnce, RetitleError } from '../lib/index.js'
+import mod, { PLUGIN_VERSION, createStatus, retitleOnce, RetitleError } from '../lib/index.js'
 import {
   applyChunk,
   collectDigest,
@@ -23,6 +24,10 @@ import {
 
 let pass = 0
 const ok = (label) => { pass += 1; console.log(`  ✅ ${label}`) }
+
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+assert.equal(PLUGIN_VERSION, pkg.version, '状态接口与安装包版本必须一致')
+ok('运行时版本与 package.json 一致')
 
 // ---------------------------------------------------------------- 假环境
 
@@ -349,7 +354,7 @@ console.log('4) host 路由：/rename 主流程')
   assert.deepEqual(trunc.renamed, [{ id: 'session-demo', title: '会话改名插件' }])
   ok('输出被 max-tokens 截断但已有标题 → 采用 + 警告（2026-09-16 事故回归用例）')
 
-  // 回归：会话自带路由没有 adapter（实测遇到 deepseek-vision）→ 回退到兜底路由
+  // 回归：目标会话模型缺少 adapter 时，不使用旧配置里的兜底模型
   const fb = makeServices({ sessionRoute: { provider: 'deepseek-vision', model: 'deepseek-vision' } })
   fb.services.llm = makeFlakyLlm({ badProviders: ['deepseek-vision'], text: '回退后的标题' })
   const fbCtx = makeCtx({ services: fb.services })
@@ -361,7 +366,7 @@ console.log('4) host 路由：/rename 主流程')
   assert.equal(fb.renamed.length, 0, '失败保留旧标题')
   ok('目标会话模型失败不降级、不改名')
 
-  // 两个候选都不可用 → 如实报错，不改名
+  // 目标模型和旧兜底都不可用时，仍只尝试目标模型并保留原标题
   const dead = makeServices({ sessionRoute: { provider: 'deepseek-vision', model: 'deepseek-vision' } })
   dead.services.llm = makeFlakyLlm({ badProviders: ['deepseek-vision', 'deepseek-official'] })
   const deadCtx = makeCtx({ services: dead.services })
@@ -372,7 +377,18 @@ console.log('4) host 路由：/rename 主流程')
   assert.equal(deadResult.json.error.code, 'llm-failed')
   assert.equal(dead.services.llm.captured.calls, 1, '只调用目标会话模型')
   assert.equal(dead.renamed.length, 0)
-  ok('所有候选路由都不可用 → 502，且不改名')
+  ok('目标模型不可用 → 502，不尝试旧兜底且不改名')
+
+  const noRoute = makeServices({ sessionRoute: null })
+  const noRouteCtx = makeCtx({ services: noRoute.services })
+  mod.apply(noRouteCtx.ctx, FALLBACK_CONFIG)
+  noRouteCtx.runInject()
+  const noRouteResult = await callRoute(noRouteCtx.routes, '/dsh-session-retitle/rename', { sessionId: 'session-demo' })
+  assert.equal(noRouteResult.res.statusCode, 503)
+  assert.equal(noRouteResult.json.error.code, 'no-model-route')
+  assert.equal(noRoute.services.llm.captured.calls, 0, '无目标模型时不调用默认或兜底模型')
+  assert.equal(noRoute.renamed.length, 0, '无目标模型时保留原标题')
+  ok('目标会话没有模型 → 503，不回退、不调用模型、不改名')
 }
 
 console.log('5) host 路由：失败分支')

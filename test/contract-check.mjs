@@ -15,7 +15,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import assert from 'node:assert/strict'
 
-import { applyChunk, buildLlmRequest, normalizeTitle, pickRoute } from '../lib/retitle.js'
+import { applyChunk, buildLlmRequest, normalizeConfig, normalizeTitle, pickRoute } from '../lib/retitle.js'
 
 /**
  * 找 DSH 安装目录：`DSH_CHECKOUT` 覆盖 → 从当前 Node 安装前缀推断。
@@ -42,13 +42,35 @@ async function loadDshPackage(name) {
 let pass = 0
 const ok = (label) => { pass += 1; console.log(`  ✅ ${label}`) }
 
+// 本地挂载契约始终执行，即使未安装 DSH 也不能掩盖配置回归。
+{
+  const yaml = fs.readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+  const pick = (key) => {
+    const match = new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`, 'm').exec(yaml)
+    return match ? match[1] : ''
+  }
+  assert.equal(pick('provider'), '', '挂载声明不应重新引入兜底 provider')
+  assert.equal(pick('model'), '', '挂载声明不应重新引入兜底 model')
+  const config = normalizeConfig({ provider: 'legacy-provider', model: 'legacy-model' })
+  assert.equal(pickRoute({ config }), null, '旧配置不能恢复模型回退')
+  assert.deepEqual(
+    pickRoute({ headerConfig: { provider: 'session-provider', model: 'session-model' }, config }),
+    { provider: 'session-provider', model: 'session-model' },
+    '标题路由保留目标会话模型',
+  )
+  for (const key of ['routePrefix', 'maxTitleBytes', 'maxDigestChars', 'maxDigestItems', 'timeoutMs', 'maxOutputTokens']) {
+    assert.equal(pick(key), String(config[key]), `${key} 的挂载值与默认值一致`)
+  }
+  ok('挂载配置与默认值一致，旧兜底模型配置不生效')
+}
+
 let sessionTitle
 let llm
 try {
   sessionTitle = await loadDshPackage('dsh-session-title')
   llm = await loadDshPackage('dsh-llm')
 } catch (err) {
-  console.log(`\n跳过契约检查：读不到 DSH 包（${err?.message ?? err}）`)
+  console.log(`\n本地配置契约已通过；跳过 3 项官方包契约：读不到 DSH 包（${err?.message ?? err}）`)
   console.log(`可用 DSH_CHECKOUT=<dsh 安装目录> 指定路径。\n`)
   process.exit(0)
 }
@@ -110,20 +132,6 @@ console.log('\n契约检查（对真实 DSH 包）')
   assert.equal(assembler.finish.kind, 'stop')
   assert.equal(ours.finish.kind, 'stop')
   ok('applyChunk 与官方 BlockAssembler 对同一分片流的结果一致')
-}
-
-// ④ 挂载声明里的兜底 provider/model 与代码默认值不漂移
-{
-  const fs = await import('node:fs')
-  const yaml = fs.readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
-  const pick = (key) => {
-    const match = new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`, 'm').exec(yaml)
-    return match ? match[1] : ''
-  }
-  const route = pickRoute({ config: { provider: pick('provider'), model: pick('model') } })
-  assert.deepEqual(route, { provider: 'deepseek-official', model: 'deepseek-flash' }, 'cordis.patch.yml 里的兜底路由')
-  assert.equal(pick('routePrefix'), '/dsh-session-retitle')
-  ok('cordis.patch.yml 的兜底路由/前缀与代码默认值一致')
 }
 
 console.log(`\n契约检查通过：${pass} 项\n`)
