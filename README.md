@@ -10,6 +10,22 @@ DSH（DeepSeek Harness）插件：**在侧栏「…」菜单增加「AI 快速�
 - 跟随主题：界面颜色全部走 DSH 自己的 CSS 变量（`--dsw-alias-*`），明暗主题切换自动生效。
 - 零运行时依赖：不 import 任何 `@deepseek-ai/*` 包，只发两条自己的 HTTP 路由。
 
+## 当前自用版：26.11.10-lhg
+
+明确支持 **DSH 0.2.2-rc.1**，并保留 **0.2.1-rc.5** 兼容。
+新版标题区域会裁剪溢出内容，头部重命名浮层现使用宿主 React DOM 的 body portal，
+随窗口/滚动重定位并约束在视口内。保留取消、Escape、外部点击、输入焦点，以及侧栏/右键菜单的 AI 快速重命名入口。
+目标会话模型、10 条/10000 字符预算、主题和信任栅栏不变。
+
+两套真实发布包各通过 39 自测、8 真实会话/标题服务集成、4 契约和 20 React DOM 检查。
+已验证官方 rc.1 CLI 隔离 Web profile 安装和配置装配。手写 JS，没有编译步骤或现有 Actions 工作流。
+浏览器视觉验收受当前环境 Chromium socket 限制阻碍；DOM 明确几何测试不代表用户桌面或付费模型端到端已测。
+
+开发验证：在与目标版本匹配的官方依赖和 React 18/jsdom 环境运行
+`DSH_NODE_MODULES="$PWD/node_modules" REQUIRE_DSH_CONTRACTS=1 npm run check`。
+`REQUIRE_DSH_CONTRACTS=1` 禁止缺包时静默跳过官方契约。
+详见 [维护记录](docs/UPSTREAM-MAINTENANCE.md)。
+
 ## 安装
 
 ```bash
@@ -145,3 +161,4 @@ lib/client.js    客户端：头部按钮 + 侧栏菜单 + 结果提示
 ## 授权
 
 MIT © 2026 Kan Zheng &lt;202309068@uibe.edu.cn&gt;
+

@@ -32,7 +32,7 @@ function detectDshDir() {
 }
 
 const DSH_DIR = detectDshDir()
-const DSH_PACKAGES = path.join(DSH_DIR, 'node_modules', '@deepseek-ai')
+const DSH_PACKAGES = path.join(process.env.DSH_NODE_MODULES || path.join(DSH_DIR, 'node_modules'), '@deepseek-ai')
 
 async function loadDshPackage(name) {
   const file = path.join(DSH_PACKAGES, name, 'lib', 'index.js')
@@ -70,6 +70,7 @@ try {
   sessionTitle = await loadDshPackage('dsh-session-title')
   llm = await loadDshPackage('dsh-llm')
 } catch (err) {
+  if (process.env.REQUIRE_DSH_CONTRACTS === '1') throw err
   console.log(`\n本地配置契约已通过；跳过 3 项官方包契约：读不到 DSH 包（${err?.message ?? err}）`)
   console.log(`可用 DSH_CHECKOUT=<dsh 安装目录> 指定路径。\n`)
   process.exit(0)
@@ -135,3 +136,4 @@ console.log('\n契约检查（对真实 DSH 包）')
 }
 
 console.log(`\n契约检查通过：${pass} 项\n`)
+

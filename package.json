@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-retitle",
-  "version": "26.11.7-lhg",
+  "version": "26.11.10-lhg",
   "description": "DSH 插件：侧栏菜单 AI 快速重命名，使用目标会话模型总结最近 10 条、最多 10000 字符；保留头部手动重命名。",
   "keywords": [
     "dsh",
@@ -35,7 +35,9 @@
     },
     "compatibility": {
       "dshReleases": {
-        "0.1.5-rc.1": "compatible"
+        "0.1.5-rc.1": "compatible",
+        "0.2.1-rc.5": "compatible",
+        "0.2.2-rc.1": "compatible"
       }
     }
   },
@@ -49,6 +51,22 @@
     "url": "git+https://github.com/davidLi17/dsh-session-retitle.git"
   },
   "scripts": {
-    "test": "node test/selftest.mjs"
+    "test": "node test/selftest.mjs",
+    "test:dom": "node test/dom.test.mjs",
+    "test:host": "node test/host-integration.mjs",
+    "test:contracts": "node test/contract-check.mjs",
+    "check": "npm test && npm run test:host && npm run test:contracts && npm run test:dom"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   }
 }
