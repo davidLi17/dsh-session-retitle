@@ -62,10 +62,10 @@ function makeSession(id, events, route = { provider: 'deepseek-official', model:
 }
 
 /** 造一个能装下 attachRoutes 的最小 ctx。 */
-function makeCtx({ services = {}, fenced = false } = {}) {
+function makeCtx({ services = {}, fenced = false, withLegacyAuth = true } = {}) {
   const routes = []
   const webServer = { register: (route) => { routes.push(route); return () => {} } }
-  const connection = { requestRejection: () => (fenced ? 403 : false) }
+  const connection = withLegacyAuth ? { requestRejection: () => (fenced ? 403 : false) } : {}
   let injectCb = null
   const scoped = { get: (name) => (name === 'webServer' ? webServer : name === 'connection' ? connection : services[name]) }
   const ctx = {
@@ -108,6 +108,30 @@ async function callRoute(routes, path, body, method = 'POST') {
   let json = null
   try { json = JSON.parse(res.body) } catch { json = null }
   return { res, json }
+}
+
+// New WebServer supplies the authenticated Peer, never the request body.
+{
+  const { ctx, routes, runInject } = makeCtx({ withLegacyAuth: false })
+  mod.apply(ctx)
+  runInject()
+  const route = routeOf(routes, '/dsh-session-retitle/status')
+  assert.equal(route.auth, 'required')
+  const active = new AbortController()
+  const revoked = new AbortController()
+  revoked.abort()
+  for (const [peer, expected] of [
+    [undefined, 403],
+    [{ principal: { kind: 'guest' }, signal: active.signal }, 403],
+    [{ principal: { kind: 'owner' }, signal: revoked.signal }, 403],
+    [{ principal: { kind: 'owner' }, signal: active.signal }, 200],
+  ]) {
+    const res = makeRes()
+    await route.handler(makeReq(undefined, 'GET'), res, peer)
+    assert.equal(res.statusCode, expected)
+    assert.equal(res.writableEnded, true)
+  }
+  ok('WebServer owner Peer: anonymous, guest and revoked peers fail closed')
 }
 
 const stopFinish = { type: 'finish', reason: { kind: 'stop' } }
